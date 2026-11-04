@@ -22,3 +22,6 @@ class InMemoryTripRepository(TripRepository):
 
     def save(self, trip: Trip) -> None:
         self._storage[trip.id.value] = trip
+
+    def get_all(self) -> list[Trip]:
+        return list(self._storage.values())

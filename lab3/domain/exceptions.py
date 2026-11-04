@@ -16,3 +16,8 @@ class TransitionNotAllowed(DomainError):
         super().__init__(f"Событие '{event}' недопустимо в состоянии '{state}'")
         self.state = state
         self.event = event
+
+class GatewayUnresolved(DomainError):
+    """Возникает, когда ни одно условие шлюза не выполнено."""
+    def __init__(self, gateway_name: str):
+        super().__init__(f"Не удалось определить поток для шлюза: {gateway_name}")
