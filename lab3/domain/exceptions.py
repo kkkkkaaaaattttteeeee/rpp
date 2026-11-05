@@ -21,3 +21,7 @@ class GatewayUnresolved(DomainError):
     """Возникает, когда ни одно условие шлюза не выполнено."""
     def __init__(self, gateway_name: str):
         super().__init__(f"Не удалось определить поток для шлюза: {gateway_name}")
+
+class ClockMovedBack(DomainError):
+    """Попытка перевести часы приложения назад."""
+    pass
