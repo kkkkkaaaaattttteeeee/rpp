@@ -1,9 +1,18 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Optional
-from datetime import datetime
+
 from .exceptions import DomainInvariantViolation
-from .value_objects import ScooterId, TripId, UserId, BatteryLevel, Money, TimeRange, ScooterState
+from .value_objects import (
+    ScooterId, TripId, UserId, BatteryLevel, Money, 
+    TimeRange, ScooterState
+)
 from .states import TripState, Booked
+
+from .events import (
+    TripBooked, TripStarted, TripPaused, TripFinished, 
+    TripPaid, TripBlocked, BookingExpired
+)
 
 MIN_BATTERY_TO_RENT = 20
 
@@ -24,23 +33,29 @@ class Scooter:
             raise DomainInvariantViolation(f"Заряд {self.battery.percent}% ниже порога")
         self.state = ScooterState.RENTED
 
+    def mark_returned(self, battery_after: BatteryLevel) -> None:
+        if self.state != ScooterState.RENTED:
+            raise DomainInvariantViolation("Самокат не в аренде")
+        self.battery = battery_after
+        self.state = ScooterState.FREE
+
 
 @dataclass
 class Trip:
     id: TripId
     scooter_id: ScooterId
     user_id: UserId
-    created_at: datetime # Время бронирования
-    
-    started_at: Optional[datetime] = None # Время начала поездки
+    created_at: datetime
+
+    started_at: Optional[datetime] = None
     time_range: Optional[TimeRange] = None
     cost: Optional[Money] = None
-    
+
     _state: TripState = field(init=False, default_factory=Booked)
     _events: list = field(init=False, default_factory=list)
 
     def __post_init__(self):
-        # При создании сразу фиксируем событие бронирования
+        # Фиксируем событие создания брони
         self._events.append(TripBooked(self.id, self.created_at))
 
     @property
@@ -55,8 +70,8 @@ class Trip:
     def events(self) -> tuple:
         return tuple(self._events)
 
-    # Методы событий с записью в журнал
-    
+    # Методы событий
+
     def start_ride(self, at: datetime) -> None:
         self._state = self._state.start_ride(self)
         self.started_at = at
@@ -68,6 +83,7 @@ class Trip:
 
     def resume_ride(self, at: datetime) -> None:
         self._state = self._state.resume_ride(self)
+        # (Можно добавить TripResumed в events.py, если нужно)
 
     def finish_ride(self, at: datetime, cost: Money) -> None:
         new_state = self._state.finish_ride(self)
@@ -84,13 +100,11 @@ class Trip:
         self._state = self._state.fail_payment(self)
         self._events.append(TripBlocked(self.id, at))
 
-    #  События таймера
-    
     def on_expire_booking(self, now: datetime) -> None:
-        """Таймер: снятие брони через 10 минут"""
+        """Событие таймера: снятие брони через 10 минут"""
         if self._state.name != "Забронирована":
-            return # Если уже начата или отменена - игнорируем
-        
+            return
+
         if now - self.created_at >= timedelta(minutes=10):
             self._state = self._state.expire_booking(self)
             self._events.append(BookingExpired(self.id, now))

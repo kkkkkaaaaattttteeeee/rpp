@@ -35,9 +35,22 @@ class ScooterState(Enum):
 class Money:
     amount: float
     currency: str = "RUB"
+
     def __post_init__(self):
         if self.amount < 0:
             raise InvalidValueObject("Сумма не может быть отрицательной")
+        if not self.currency:
+            raise InvalidValueObject("Валюта обязательна")
+
+    def __add__(self, other):
+        if self.currency != other.currency:
+            raise InvalidValueObject("Валюты не совпадают")
+        return Money(self.amount + other.amount, self.currency)
+
+    def __mul__(self, factor):
+        if factor < 0:
+            raise InvalidValueObject("Множитель не может быть отрицательным")
+        return Money(self.amount * factor, self.currency)
 
 @dataclass(frozen=True)
 class BatteryLevel:
