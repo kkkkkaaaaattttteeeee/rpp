@@ -39,7 +39,7 @@ user_repo = UserRepo()
 scooter_repo.save(Scooter(id=ScooterId("sc-1"), battery=BatteryLevel(80)))
 scooter_repo.save(Scooter(id=ScooterId("sc-2"), battery=BatteryLevel(15)))
 
-tariff = Tariff(price_per_minute=Money(5.0), minimum_cost=Money(50.0))
+tariff = Tariff(price_per_minute=Money(5.0), minimum_cost=Money(50.0), pause_price_per_minute=Money(2.0))
 
 process = RentalProcess(
     scooter_repo=scooter_repo,
