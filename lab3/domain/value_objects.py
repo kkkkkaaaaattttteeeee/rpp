@@ -3,7 +3,6 @@ from datetime import datetime
 from enum import Enum
 from .exceptions import InvalidValueObject
 
-# ИСПРАВЛЕНИЕ ЗАМЕЧАНИЯ 1: ID как объекты-значения
 @dataclass(frozen=True)
 class ScooterId:
     value: str
@@ -25,7 +24,6 @@ class UserId:
         if not self.value or not self.value.strip():
             raise InvalidValueObject("ID пользователя не может быть пустым")
 
-# ОБЪЕКТЫ-ЗНАЧЕНИЯ ИЗ ЛР2
 class ScooterState(Enum):
     FREE = "free"
     RENTED = "rented"
@@ -35,18 +33,15 @@ class ScooterState(Enum):
 class Money:
     amount: float
     currency: str = "RUB"
-
     def __post_init__(self):
         if self.amount < 0:
             raise InvalidValueObject("Сумма не может быть отрицательной")
         if not self.currency:
             raise InvalidValueObject("Валюта обязательна")
-
     def __add__(self, other):
         if self.currency != other.currency:
             raise InvalidValueObject("Валюты не совпадают")
         return Money(self.amount + other.amount, self.currency)
-
     def __mul__(self, factor):
         if factor < 0:
             raise InvalidValueObject("Множитель не может быть отрицательным")
@@ -75,6 +70,9 @@ class TimeRange:
 class Tariff:
     price_per_minute: Money
     minimum_cost: Money
+    pause_price_per_minute: Money  # <--- НОВОЕ ПОЛЕ
+
     def __post_init__(self):
-        if self.price_per_minute.currency != self.minimum_cost.currency:
+        if (self.price_per_minute.currency != self.minimum_cost.currency or 
+            self.price_per_minute.currency != self.pause_price_per_minute.currency):
             raise InvalidValueObject("Валюты тарифа должны совпадать")
