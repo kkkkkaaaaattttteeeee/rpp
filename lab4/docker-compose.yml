@@ -13,3 +13,41 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  # Поставщик 1
+  provider1:
+    build: ./provider
+    container_name: lab4_provider1
+    environment:
+      PROVIDER_ID: 1
+      BASE_DELAY_MS: 300
+      ERROR_RATE: 0.05
+      LONG_DELAY_RATE: 0.0
+      FLIGHTS_COUNT: 500
+    ports:
+      - "8001:8000" # Пробрасываем порт 8001 наружу (чтобы можно было тестировать)
+
+  # Поставщик 2
+  provider2:
+    build: ./provider
+    container_name: lab4_provider2
+    environment:
+      PROVIDER_ID: 2
+      BASE_DELAY_MS: 500
+      ERROR_RATE: 0.05
+      LONG_DELAY_RATE: 0.0
+      FLIGHTS_COUNT: 500
+    ports:
+      - "8002:8000"
+
+  # Поставщик 3 (Самый медленный, с 10% долгих задержек)
+  provider3:
+    build: ./provider
+    container_name: lab4_provider3
+    environment:
+      PROVIDER_ID: 3
+      BASE_DELAY_MS: 800
+      ERROR_RATE: 0.05
+      LONG_DELAY_RATE: 0.1
+      FLIGHTS_COUNT: 500
+    ports:
+      - "8003:8000"
