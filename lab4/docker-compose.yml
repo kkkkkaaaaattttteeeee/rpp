@@ -25,6 +25,12 @@ services:
       FLIGHTS_COUNT: 500
     ports:
       - "8001:8000" # Пробрасываем порт 8001 наружу (чтобы можно было тестировать)
+    healthcheck:
+      # Проверяем эндпоинт /health внутри контейнера
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Поставщик 2
   provider2:
@@ -38,6 +44,12 @@ services:
       FLIGHTS_COUNT: 500
     ports:
       - "8002:8000"
+    healthcheck:
+      # Проверяем эндпоинт /health внутри контейнера
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Поставщик 3 (Самый медленный, с 10% долгих задержек)
   provider3:
@@ -51,16 +63,30 @@ services:
       FLIGHTS_COUNT: 500
     ports:
       - "8003:8000"
+    healthcheck:
+      # Проверяем эндпоинт /health внутри контейнера
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   search_service:
     build: ./search_service
     container_name: lab4_search
     environment:
-      # Указываем адрес БД внутри Docker-сети (имя сервиса db)
       DATABASE_URL: "postgresql+psycopg2://postgres:postgres@db:5432/flights_db"
     ports:
-      - "8000:8000" # Пробрасываем наружу как раз на 8000 порт
+      - "8000:8000"
+    # Добавляем capability для работы py-spy
+    cap_add:
+      - SYS_PTRACE
+    # Запускаем сервис поиска ТОЛЬКО после того, как все зависимости станут healthy
     depends_on:
-      - db
-      - provider1
-      - provider2
-      - provider3
+      db:
+        condition: service_healthy
+      provider1:
+        condition: service_healthy
+      provider2:
+        condition: service_healthy
+      provider3:
+        condition: service_healthy
