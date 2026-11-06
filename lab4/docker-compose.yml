@@ -51,3 +51,16 @@ services:
       FLIGHTS_COUNT: 500
     ports:
       - "8003:8000"
+  search_service:
+    build: ./search_service
+    container_name: lab4_search
+    environment:
+      # Указываем адрес БД внутри Docker-сети (имя сервиса db)
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@db:5432/flights_db"
+    ports:
+      - "8000:8000" # Пробрасываем наружу как раз на 8000 порт
+    depends_on:
+      - db
+      - provider1
+      - provider2
+      - provider3
