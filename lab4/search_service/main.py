@@ -18,12 +18,12 @@ PROVIDERS = {
 }
 
 @app.get("/health")
-def health():
+async def health():
     """Проверка работоспособности самого сервиса поиска"""
     return {"status": "ok"}
 
 @app.get("/search")
-def search(
+async def search(  # <--- Добавили async
     origin: str = Query(...),
     destination: str = Query(...),
     date: str = Query(...)
