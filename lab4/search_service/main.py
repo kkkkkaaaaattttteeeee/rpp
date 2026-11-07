@@ -1,91 +1,109 @@
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import JSONResponse
-import requests
-import time
-from datetime import datetime
+from contextlib import asynccontextmanager
+import httpx
+import asyncio
 import os
+import time
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from database import get_flights_from_db
 from logic import build_routes
 
-app = FastAPI()
-
-# Адреса поставщиков в Docker-сети
 PROVIDERS = {
     1: "http://provider1:8000/flights",
     2: "http://provider2:8000/flights",
     3: "http://provider3:8000/flights"
 }
 
+# 1. Lifespan: создаем клиенты при старте, закрываем при выключении
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # При запуске
+    app.state.http_client = httpx.AsyncClient()
+    app.state.db_engine = create_async_engine(
+        os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/flights_db"),
+        pool_size=20,      # Увеличиваем пул
+        max_overflow=10    # Добавляем резерв
+    )
+    yield
+    # При остановке
+    await app.state.http_client.aclose()
+    await app.state.db_engine.dispose()
+
+app = FastAPI(lifespan=lifespan)
+
 @app.get("/health")
 async def health():
-    """Проверка работоспособности самого сервиса поиска"""
     return {"status": "ok"}
 
+# 2. Функция опроса одного поставщика с тайм-аутом и ретраем
+async def fetch_provider(client, p_id, url, date):
+    start_time = time.time()
+    for attempt in range(2):
+        # Вычисляем оставшееся время до жесткого лимита в 2 секунды
+        remaining = 2.0 - (time.time() - start_time)
+        if remaining <= 0:
+            break
+            
+        try:
+            # 3. asyncio.timeout ограничивает время ожидания
+            async with asyncio.timeout(remaining):
+                response = await client.get(url, params={"date": date})
+                if response.status_code == 200:
+                    return response.json().get("flights", [])
+                elif response.status_code == 500:
+                    pass # Идем на ретрай
+        except (httpx.RequestError, asyncio.TimeoutError):
+            pass # Идем на ретрай
+
+        if attempt == 0:
+            # 4. Асинхронная пауза перед повтором
+            await asyncio.sleep(0.2)
+            
+    return None # Если обе попытки провалились
+
 @app.get("/search")
-async def search(  # <--- Добавили async
+async def search(
     origin: str = Query(...),
     destination: str = Query(...),
     date: str = Query(...)
 ):
     start_time = time.time()
-    all_flights = []
+    client = app.state.http_client
+    engine = app.state.db_engine
+
+    # 5. Создаем задачи для БД и всех поставщиков
+    db_task = get_flights_from_db(engine, date)
+    provider_tasks = [
+        fetch_provider(client, p_id, url, date) 
+        for p_id, url in PROVIDERS.items()
+    ]
+
+    # 6. asyncio.gather: запускаем ВСЁ одновременно
+    # return_exceptions=True гарантирует, что падение одной задачи не сломает остальные
+    results = await asyncio.gather(db_task, *provider_tasks, return_exceptions=True)
+    
+    # Разбираем результаты
+    db_flights = results[0] if not isinstance(results[0], Exception) else []
+    provider_results = results[1:]
+
+    all_flights = list(db_flights)
     failed_providers = []
+    
+    for idx, p_res in enumerate(provider_results, start=1):
+        if p_res is None or isinstance(p_res, Exception):
+            failed_providers.append(f"Provider {idx}")
+        else:
+            all_flights.extend(p_res)
 
-    # 1. Читаем из собственной БД
-    try:
-        db_flights = get_flights_from_db(date)
-        all_flights.extend(db_flights)
-    except Exception as e:
-        print(f"Ошибка БД: {e}")
-
-    # 2. Синхронный опрос поставщиков по очереди
-    for p_id, url in PROVIDERS.items():
-        p_start_time = time.time()
-        success = False
-        
-        # Первая попытка
-        try:
-            # Ждем не более 1.8 секунды, чтобы оставить время на ретрай
-            response = requests.get(url, params={"date": date}, timeout=1.8)
-            if response.status_code == 200:
-                all_flights.extend(response.json().get("flights", []))
-                success = True
-            elif response.status_code == 500:
-                pass # Идем на ретрай
-        except requests.exceptions.RequestException:
-            pass # Идем на ретрай
-
-        # Повторная попытка (если была ошибка или таймаут)
-        if not success:
-            # Проверяем, укладываемся ли мы в лимит 2 секунды на поставщика
-            elapsed = time.time() - p_start_time
-            if elapsed + 0.2 < 2.0:
-                time.sleep(0.2) # Пауза перед повтором
-                try:
-                    # Таймаут на остаток времени
-                    remaining_time = max(0.1, 2.0 - (time.time() - p_start_time))
-                    response = requests.get(url, params={"date": date}, timeout=remaining_time)
-                    if response.status_code == 200:
-                        all_flights.extend(response.json().get("flights", []))
-                        success = True
-                except requests.exceptions.RequestException:
-                    pass
-            
-        # Если после двух попыток успеха нет — поставщик в списке отвалившихся
-        if not success:
-            failed_providers.append(f"Provider {p_id}")
-
-    # 3. Проверка на полное отсутствие данных
-    if not all_flights and len(failed_providers) == len(PROVIDERS):
+    # Проверка на полный отказ
+    if not all_flights and len(failed_providers) == 3:
         raise HTTPException(status_code=503, detail="Поиск временно недоступен")
 
-    # 4. Составление маршрутов
-    routes = build_routes(all_flights, origin, destination)
+    # Склейка маршрутов (чистая функция)
+    routes = await asyncio.to_thread(build_routes, all_flights, origin, destination)
+    processing_time = round((time.time() - start_time) * 1000, 2)
 
-    # 5. Формируем ответ
-    processing_time = round((time.time() - start_time) * 1000, 2) # в миллисекундах
-    
     return {
         "routes": routes,
         "failed_providers": failed_providers,

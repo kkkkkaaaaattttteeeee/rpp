@@ -74,7 +74,7 @@ services:
     build: ./search_service
     container_name: lab4_search
     environment:
-      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@db:5432/flights_db"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/flights_db"
     ports:
       - "8000:8000"
     # Добавляем capability для работы py-spy
