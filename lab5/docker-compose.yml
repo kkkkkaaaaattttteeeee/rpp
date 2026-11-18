@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: loyalty_user
+      POSTGRES_PASSWORD: loyalty_pass
+      POSTGRES_DB: loyalty_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty_user -d loyalty_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: loyalty_user
+      RABBITMQ_DEFAULT_PASS: loyalty_pass
+    ports:
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    build: ./worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://loyalty_user:loyalty_pass@postgres:5432/loyalty_db
+      RABBITMQ_URL: amqp://loyalty_user:loyalty_pass@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://loyalty_user:loyalty_pass@postgres:5432/loyalty_db
+      RABBITMQ_URL: amqp://loyalty_user:loyalty_pass@rabbitmq:5672/
+    ports:
+      - "8000:8000"
+    depends_on:
+      worker:
+        condition: service_started # API ждет запуска воркера (который создаст таблицы)
+    restart: unless-stopped
+
+  notifier:
+    build: ./notifier
+    environment:
+      RABBITMQ_URL: amqp://loyalty_user:loyalty_pass@rabbitmq:5672/
+      MIN_DELAY_MS: 200
+      MAX_DELAY_MS: 1500
+      UNSUBSCRIBED: ""
+    ports:
+      - "8001:8001"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  analytics:
+    build: ./analytics
+    environment:
+      RABBITMQ_URL: amqp://loyalty_user:loyalty_pass@rabbitmq:5672/
+    ports:
+      - "8002:8002"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  rabbitmq_data:
